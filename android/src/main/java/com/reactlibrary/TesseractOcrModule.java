@@ -37,10 +37,15 @@ public class TesseractOcrModule extends ReactContextBaseJavaModule {
     private static String DATA_PATH = Environment.getExternalStorageDirectory().toString();
     private static String TESS_FILES_PATH;
     private TessBaseAPI tesseract;
+    private Thread bgThread;
 
     public TesseractOcrModule(ReactApplicationContext reactContext) {
         super(reactContext);
         this.reactContext = reactContext;
+        this.bgThread = null;
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O){
+            this.DATA_PATH = reactContext.getExternalFilesDir(null).toString();
+        }
         if (!this.DATA_PATH.contains(reactContext.getPackageName())) {
             this.DATA_PATH += File.separator + reactContext.getPackageName();
         }
@@ -70,6 +75,10 @@ public class TesseractOcrModule extends ReactContextBaseJavaModule {
     public void recognize(String imageSource, final String lang, @Nullable final ReadableMap tessOptions, final Promise promise) {
         Log.d(getName(), "recognize");
 
+        if (bgThread != null && bgThread.isAlive()) {
+            promise.resolve("");
+            return;
+        }
         try {
             if (shouldCopyTrainedFile(lang)) {
                 prepareTrainedFilesDirectory();
@@ -79,7 +88,7 @@ public class TesseractOcrModule extends ReactContextBaseJavaModule {
             final Bitmap bitmap = getBitmap(imageSource);
 
             if (bitmap != null) {
-                new Thread() {
+                bgThread = new Thread() {
                     @Override
                     public void run() {
                         tesseract = createTesseractAPI(lang, tessOptions);
@@ -90,9 +99,11 @@ public class TesseractOcrModule extends ReactContextBaseJavaModule {
 
                         tesseract.end();
                         promise.resolve(recognizedText);
+                        bgThread = null;
                     }
 
-                }.start();
+                };
+                bgThread.start();
             } else {
                 throw new IOException("Could not decode a file path into a bitmap.");
             }
@@ -248,7 +259,7 @@ public class TesseractOcrModule extends ReactContextBaseJavaModule {
         if (!dir.exists()) {
             if (!dir.mkdirs()) {
                 Log.e(getName(), "Could not create directory, please make sure the app has write permission");
-                throw new IOException("Could not create directory");
+                throw new IOException("Could not create directory" + TESS_FILES_PATH);
             }
         }
     }
